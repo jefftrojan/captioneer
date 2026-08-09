@@ -70,7 +70,7 @@ def _load_asr():
             return
         try:
             import torch
-            from transformers import pipeline
+            from transformers import GenerationConfig, pipeline
 
             print(f"[mbaza] loading ASR {MBAZA_ASR_MODEL} …", flush=True)
             pipe = pipeline(
@@ -78,6 +78,22 @@ def _load_asr():
                 model=MBAZA_ASR_MODEL,
                 token=HF_TOKEN,
             )
+            # This finetune ships no generation_config.json, so transformers falls
+            # back to a default that lacks the timestamp-token setup (e.g.
+            # no_timestamps_token_id) return_timestamps=True needs, and every
+            # request 500s. It's a whisper-small finetune (same tokenizer/vocab),
+            # so the base model's generation config is the correct one to borrow.
+            if getattr(pipe.model.generation_config, "no_timestamps_token_id", None) is None:
+                base_config = GenerationConfig.from_pretrained(
+                    "openai/whisper-small", token=HF_TOKEN
+                )
+                pipe.model.generation_config = base_config
+                # The ASR pipeline snapshots model.generation_config into its own
+                # `self.generation_config` at construction time and passes THAT to
+                # generate() — not a live reference to the model's — so it has to
+                # be patched separately or it keeps using the broken one.
+                pipe.generation_config = base_config
+                print("[mbaza] borrowed generation_config from openai/whisper-small", flush=True)
             # Same int8 dynamic quantization as the translation model above —
             # matters more here, since live mode needs each ~4s window
             # transcribed faster than it took to record for captions to keep up.
