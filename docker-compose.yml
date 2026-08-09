@@ -1,0 +1,29 @@
+services:
+  inference:
+    build: ./inference-py
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - MBAZA_MODEL=${MBAZA_MODEL:-mbazaNLP/Nllb_finetuned_general_en_kin}
+      - HF_HOME=/cache
+    volumes:
+      - hf-cache-py:/cache
+    ports:
+      - "8000:8000"
+
+  app:
+    build: .
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - MBAZA_URL=http://inference:8000
+      - HF_HOME=/cache
+      - PORT=8787
+    volumes:
+      - hf-cache-node:/cache
+    ports:
+      - "8787:8787"
+    depends_on:
+      - inference
+
+volumes:
+  hf-cache-py:
+  hf-cache-node:

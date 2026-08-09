@@ -1,0 +1,179 @@
+"""Digital Umuganda / Mbaza inference sidecar.
+
+Runs Kinyarwanda models that aren't available on HF serverless inference and
+can't run in transformers.js (PyTorch-only): an NLLB translation finetune and,
+optionally, a Whisper-Kinyarwanda ASR finetune. The Node server proxies to this
+service for the "Rwanda-local" engine.
+"""
+import os
+import threading
+from typing import List, Optional
+
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+HF_TOKEN = os.environ.get("HF_TOKEN")
+MBAZA_MODEL = os.environ.get("MBAZA_MODEL", "mbazaNLP/Nllb_finetuned_general_en_kin")
+MBAZA_ASR_MODEL = os.environ.get("MBAZA_ASR_MODEL", "mbazaNLP/Whisper-Small-Kinyarwanda")
+# Greedy by default: this is a 1.3B model on CPU, where 4-beam search is ~4x
+# slower (~80s/sentence). Bump MBAZA_NUM_BEAMS on a GPU host for quality.
+MBAZA_NUM_BEAMS = int(os.environ.get("MBAZA_NUM_BEAMS", "1"))
+
+app = FastAPI(title="Captioneer Mbaza sidecar")
+
+_translate = {"ready": False, "tok": None, "model": None, "error": None}
+_asr = {"ready": False, "pipe": None, "error": None}
+_lock = threading.Lock()
+_asr_lock = threading.Lock()
+
+
+def _load_translate():
+    """Lazy-load the NLLB finetune on first use (keeps startup fast)."""
+    if _translate["ready"] or _translate["error"]:
+        return
+    with _lock:
+        if _translate["ready"] or _translate["error"]:
+            return
+        try:
+            import torch  # noqa: F401
+            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+            print(f"[mbaza] loading {MBAZA_MODEL} …", flush=True)
+            tok = AutoTokenizer.from_pretrained(MBAZA_MODEL, token=HF_TOKEN)
+            model = AutoModelForSeq2SeqLM.from_pretrained(MBAZA_MODEL, token=HF_TOKEN)
+            model.eval()
+            # int8 dynamic quantization: 2-4x faster Linear layers on CPU (this
+            # is a 1.3B model with no GPU), with negligible translation-quality
+            # loss. Disable with MBAZA_QUANTIZE=0.
+            if os.environ.get("MBAZA_QUANTIZE", "1") == "1":
+                try:
+                    model = torch.quantization.quantize_dynamic(
+                        model, {torch.nn.Linear}, dtype=torch.qint8
+                    )
+                    print("[mbaza] applied int8 dynamic quantization", flush=True)
+                except Exception as qe:
+                    print(f"[mbaza] quantization skipped: {qe}", flush=True)
+            torch.set_num_threads(os.cpu_count() or 4)
+            _translate.update(tok=tok, model=model, ready=True)
+            print("[mbaza] translation ready", flush=True)
+        except Exception as e:  # pragma: no cover - surfaced via /health
+            _translate["error"] = str(e)
+            print(f"[mbaza] load failed: {e}", flush=True)
+
+
+def _load_asr():
+    """Lazy-load the Kinyarwanda Whisper finetune for ASR."""
+    if _asr["ready"] or _asr["error"]:
+        return
+    with _asr_lock:
+        if _asr["ready"] or _asr["error"]:
+            return
+        try:
+            import torch
+            from transformers import pipeline
+
+            print(f"[mbaza] loading ASR {MBAZA_ASR_MODEL} …", flush=True)
+            pipe = pipeline(
+                "automatic-speech-recognition",
+                model=MBAZA_ASR_MODEL,
+                token=HF_TOKEN,
+            )
+            # Same int8 dynamic quantization as the translation model above —
+            # matters more here, since live mode needs each ~4s window
+            # transcribed faster than it took to record for captions to keep up.
+            if os.environ.get("MBAZA_QUANTIZE", "1") == "1":
+                try:
+                    pipe.model = torch.quantization.quantize_dynamic(
+                        pipe.model, {torch.nn.Linear}, dtype=torch.qint8
+                    )
+                    print("[mbaza] applied int8 dynamic quantization to ASR", flush=True)
+                except Exception as qe:
+                    print(f"[mbaza] ASR quantization skipped: {qe}", flush=True)
+            _asr.update(pipe=pipe, ready=True)
+            print("[mbaza] ASR ready", flush=True)
+        except Exception as e:  # pragma: no cover
+            _asr["error"] = str(e)
+            print(f"[mbaza] ASR load failed: {e}", flush=True)
+
+
+@app.on_event("startup")
+def _startup():
+    threading.Thread(target=_load_translate, daemon=True).start()
+
+
+@app.get("/health")
+def health():
+    return {
+        "ok": True,
+        "translate_ready": _translate["ready"],
+        "asr_ready": _asr["ready"],
+        "error": _translate["error"],
+        "asr_error": _asr["error"],
+        "model": MBAZA_MODEL,
+        "asr_model": MBAZA_ASR_MODEL,
+    }
+
+
+class TranslateReq(BaseModel):
+    texts: List[str]
+    source: str
+    target: str
+    max_length: Optional[int] = 256
+
+
+@app.post("/translate")
+def translate(req: TranslateReq):
+    _load_translate()
+    if not _translate["ready"]:
+        return {"error": _translate["error"] or "model still loading"}
+
+    import torch
+
+    tok = _translate["tok"]
+    model = _translate["model"]
+    tok.src_lang = req.source
+    forced_bos = tok.convert_tokens_to_ids(req.target)
+
+    out: List[str] = []
+    # One sentence at a time keeps NLLB output clean (no batch-padding artifacts).
+    with torch.no_grad():
+        for text in req.texts:
+            enc = tok(text, return_tensors="pt", truncation=True, max_length=512)
+            gen = model.generate(
+                **enc,
+                forced_bos_token_id=forced_bos,
+                max_length=req.max_length,
+                num_beams=MBAZA_NUM_BEAMS,
+            )
+            out.append(tok.batch_decode(gen, skip_special_tokens=True)[0])
+    return {"translations": out}
+
+
+class TranscribeReq(BaseModel):
+    # base64 of little-endian float32 PCM samples (mono), already resampled.
+    audio_b64: str
+    sampling_rate: int = 16000
+
+
+@app.post("/transcribe")
+def transcribe(req: TranscribeReq):
+    """Kinyarwanda speech -> timestamped chunks (Digital Umuganda Whisper)."""
+    _load_asr()
+    if not _asr["ready"]:
+        return {"error": _asr["error"] or "ASR model still loading"}
+
+    import base64
+
+    import numpy as np
+
+    samples = np.frombuffer(base64.b64decode(req.audio_b64), dtype=np.float32).copy()
+    result = _asr["pipe"](
+        {"raw": samples, "sampling_rate": req.sampling_rate},
+        return_timestamps=True,
+        chunk_length_s=30,
+        stride_length_s=5,
+    )
+    chunks = result.get("chunks") or [
+        {"timestamp": [0, None], "text": result.get("text", "")}
+    ]
+    return {"chunks": chunks}

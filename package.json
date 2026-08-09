@@ -1,0 +1,15 @@
+{
+  "name": "captioneer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Translate video captions (.srt/.vtt) between English and Kinyarwanda, with swappable local models.",
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm --prefix server run dev",
+    "dev:web": "npm --prefix web run dev",
+    "install:all": "npm install && npm --prefix server install && npm --prefix web install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
