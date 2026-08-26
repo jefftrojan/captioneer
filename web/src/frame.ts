@@ -1,6 +1,5 @@
-// Client-side video frame capture for timeline thumbnails, and a small
-// YouTube URL parser for the preview modal's embed. Both are pure browser
-// APIs — no new dependency.
+// Client-side video frame capture for timeline thumbnails — a pure browser
+// API, no new dependency.
 
 let captureQueue: Promise<void> = Promise.resolve();
 
@@ -46,21 +45,4 @@ export function captureFrame(
     () => undefined,
   );
   return result;
-}
-
-/** Parse a YouTube video ID out of watch/shorts/embed/short-link URL shapes. */
-export function extractYouTubeId(url: string): string | null {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.replace(/^www\./, "");
-    if (host === "youtu.be") return u.pathname.slice(1) || null;
-    if (host === "youtube.com" || host === "m.youtube.com") {
-      if (u.pathname === "/watch") return u.searchParams.get("v");
-      const m = u.pathname.match(/^\/(embed|shorts)\/([^/]+)/);
-      if (m) return m[2];
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }

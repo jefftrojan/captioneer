@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Clapperboard, Download, X } from "lucide-react";
 import { useWorkflow } from "../workflow";
 import Timeline from "../Timeline";
-import PreviewModal from "../PreviewModal";
+import PreviewPane from "../PreviewPane";
+import TranscriptPanel from "../TranscriptPanel";
+import { videoProxyUrl } from "../api";
 import { parseTimeToSeconds } from "../subtitles";
 
 function fmtEta(seconds: number): string {
@@ -22,7 +24,7 @@ export default function Editor() {
   const wf = useWorkflow();
   const [selectedIndex, setSelectedIndex] = useState<number | null>(wf.cues.length ? 0 : null);
   const [editingFocused, setEditingFocused] = useState(false);
-  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [liveIndex, setLiveIndex] = useState(-1);
 
   // Uploaded video/audio bytes only exist client-side for the current
   // session (never persisted) — when present, they enable real timeline
@@ -37,6 +39,14 @@ export default function Editor() {
     setVideoSrc(objUrl);
     return () => URL.revokeObjectURL(objUrl);
   }, [wf.videoFile]);
+
+  // Unified "anything a <video> element can play": an uploaded file's blob
+  // URL, or the server's proxy for a URL session (it downloads the source
+  // once via yt-dlp and serves the real file) — so preview, live transcript
+  // sync, and timeline thumbnails all work the same regardless of source,
+  // instead of falling back to an opaque platform embed for URL sessions.
+  const previewSrc =
+    videoSrc ?? (wf.intakeMode === "url" && wf.url.trim() ? videoProxyUrl(wf.url.trim()) : undefined);
 
   // While translating, the detail panel + timeline follow the cue currently
   // being processed — that's the "watch it happen" effect, not a separate
@@ -261,14 +271,30 @@ export default function Editor() {
             </div>
           ) : (
             <>
+              <div className="preview-row">
+                <PreviewPane
+                  videoSrc={previewSrc}
+                  cues={wf.cues}
+                  translations={wf.translations}
+                  seekTo={selected ? parseTimeToSeconds(selected.start) : null}
+                  onActiveChange={setLiveIndex}
+                />
+                <TranscriptPanel
+                  cues={wf.cues}
+                  translations={wf.translations}
+                  selectedIndex={selectedIndex}
+                  liveIndex={liveIndex}
+                  onSelect={setSelectedIndex}
+                />
+              </div>
+
               <Timeline
                 cues={wf.cues}
                 translations={wf.translations}
                 selectedIndex={selectedIndex}
                 onSelect={setSelectedIndex}
                 activeIndex={wf.busy ? wf.translatingIndex : null}
-                videoSrc={videoSrc}
-                onPreview={setPreviewIndex}
+                videoSrc={previewSrc}
                 rangeStart={wf.rangeStart}
                 rangeEnd={wf.rangeEnd}
               />
@@ -323,16 +349,6 @@ export default function Editor() {
           )}
         </section>
       </div>
-
-      {previewIndex != null && wf.cues[previewIndex] && (
-        <PreviewModal
-          onClose={() => setPreviewIndex(null)}
-          startSeconds={parseTimeToSeconds(wf.cues[previewIndex].start)}
-          caption={wf.cues[previewIndex].text}
-          videoSrc={videoSrc}
-          youtubeUrl={wf.intakeMode === "url" ? wf.url : undefined}
-        />
-      )}
     </>
   );
 }

@@ -46,6 +46,14 @@ export interface UrlResult {
   truncated: boolean;
 }
 
+/** URL a <video> element can play directly for a URL-sourced session — the
+ * server downloads it once (yt-dlp) and serves the real file, cached, so
+ * playback/seeking/thumbnails work exactly like an uploaded file instead of
+ * an opaque platform embed. */
+export function videoProxyUrl(url: string): string {
+  return `/api/video-proxy?url=${encodeURIComponent(url)}`;
+}
+
 export async function fetchFromUrl(
   url: string,
   language: string,

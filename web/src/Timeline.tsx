@@ -12,7 +12,6 @@ interface TimelineProps {
    * real frame thumbnails. Omitted for file/URL/live sessions (no video
    * bytes available client-side), which fall back to plain color bars. */
   videoSrc?: string;
-  onPreview?: (index: number) => void;
   rangeStart?: number | null;
   rangeEnd?: number | null;
 }
@@ -48,7 +47,6 @@ export default function Timeline({
   onSelect,
   activeIndex,
   videoSrc,
-  onPreview,
   rangeStart,
   rangeEnd,
 }: TimelineProps) {
@@ -212,7 +210,6 @@ export default function Timeline({
                   backgroundImage: thumb ? `url(${thumb})` : undefined,
                 }}
                 onClick={() => onSelect(i)}
-                onDoubleClick={() => onPreview?.(i)}
                 title={cues[i].text}
               />
             );

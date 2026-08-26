@@ -1,5 +1,6 @@
 import { createReadStream, existsSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -10,7 +11,7 @@ import { env as hfEnv } from "@huggingface/transformers";
 import { LANGUAGES } from "./engines/types.js";
 import { defaultEngine, getEngine, listEngines } from "./engines/registry.js";
 import { transcribe, transcribeKinyarwanda, warmupAsr } from "./asr.js";
-import { fetchFromUrl } from "./urlfetch.js";
+import { downloadVideoClip, fetchFromUrl } from "./urlfetch.js";
 import { burnSubtitles } from "./burn.js";
 import { synthesizeDub } from "./dub.js";
 import { parseSubtitles } from "./subtitles.js";
@@ -114,6 +115,45 @@ app.post("/api/from-url", async (req, res) => {
   } catch (err: any) {
     console.error("[from-url] error:", err);
     res.status(500).json({ error: err?.message ?? "URL fetch failed" });
+  }
+});
+
+// Downloads a URL source once (yt-dlp) and serves the real file, so the
+// editor's <video> element (preview pane, live transcript sync, timeline
+// thumbnails) works on a URL session exactly like an uploaded one instead of
+// an opaque YouTube iframe embed. Cached per URL — repeated requests (the
+// browser re-fetches on every seek via Range headers) reuse the same file
+// rather than re-running yt-dlp. A small in-memory LRU-ish cache, evicting
+// the oldest entry past VIDEO_PROXY_MAX_CACHE — fine for a single-user dev
+// server, not meant to survive a restart or scale to many concurrent users.
+const videoProxyCache = new Map<string, { dir: string; filePath: string }>();
+const VIDEO_PROXY_MAX_CACHE = 3;
+
+app.get("/api/video-proxy", async (req, res) => {
+  try {
+    const url = req.query.url;
+    if (!url || typeof url !== "string") {
+      return res.status(400).json({ error: "Missing url" });
+    }
+    let entry = videoProxyCache.get(url);
+    if (!entry) {
+      const dir = await mkdtemp(path.join(os.tmpdir(), "captioneer-preview-"));
+      const filePath = await downloadVideoClip(dir, url);
+      entry = { dir, filePath };
+      videoProxyCache.set(url, entry);
+      if (videoProxyCache.size > VIDEO_PROXY_MAX_CACHE) {
+        const oldestKey = videoProxyCache.keys().next().value as string;
+        const oldest = videoProxyCache.get(oldestKey)!;
+        videoProxyCache.delete(oldestKey);
+        rm(oldest.dir, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+    res.sendFile(entry.filePath);
+  } catch (err: any) {
+    console.error("[video-proxy] error:", err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: err?.message ?? "Could not load video" });
+    }
   }
 });
 
