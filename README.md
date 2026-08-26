@@ -25,6 +25,10 @@ mbazaNLP** so you can compare a global model against a Kinyarwanda specialist.
 - **Burn captions into the video.** Render the translated subtitles into the
   video with ffmpeg and download a finished `.mp4` (uploaded video or URL,
   full-length or trimmed to a range).
+- **Dub the audio.** Replace the video's original audio with synthesized
+  speech in the translated language (Meta MMS-TTS), instead of or alongside
+  burned-in captions. Per-cue speech that overflows its time slot is sped up
+  (capped at 1.6x) to fit; a cue that finishes early just leaves silence.
 - **Live mic → captions.** Talk into the mic and captions fill in every few
   seconds (rolling ~4s windows over a websocket) — then translate as usual.
   Not instant transcription (Whisper needs a finished clip), but close.
@@ -51,7 +55,7 @@ sidebar (`web/src/Sidebar.tsx`) and shared state in `web/src/workflow.tsx`:
 |------------------|----------------------------------------|------|
 | `web/`           | Vite + React + TS                      | UI; parses/serializes subtitles; in the container it's served by the Node server |
 | `server/`        | Express + TS + `@huggingface/transformers` + ffmpeg | Translation (NLLB-200) + Whisper ASR API |
-| `inference-py/`  | FastAPI + PyTorch + `transformers`     | Runs the Digital Umuganda / Mbaza NLLB finetune (PyTorch-only, can't run in JS) |
+| `inference-py/`  | FastAPI + PyTorch + `transformers`     | Runs the Digital Umuganda / Mbaza NLLB finetune, Kinyarwanda Whisper ASR, and Meta MMS-TTS dubbing voices (all PyTorch-only, can't run in JS) |
 
 The Mbaza engine is only "available" when the Python sidecar answers its health
 check, so the app still works fully on NLLB if the sidecar is off.
@@ -108,7 +112,7 @@ MBAZA_URL=http://localhost:8000                   # sidecar URL (compose overrid
 | `POST /api/translate` | `{ texts[], source, target, engine }`           | `{ translations[] }` |
 | `POST /api/transcribe` | multipart `file`, `language`                   | `{ cues[] }` |
 | `POST /api/from-url` | `{ url, language, mode? }`                       | `{ cues[], sourceUsed, title, truncated }` |
-| `POST /api/burn`    | multipart `srt` + (`video` file or `url`) + `startSec?`/`endSec?` | `video/mp4` (captions burned in, optionally trimmed) |
+| `POST /api/burn`    | multipart `srt` + (`video` file or `url`) + `startSec?`/`endSec?` + `dub?`/`dubTarget?`/`burnCaptions?` | `video/mp4` (captions burned in and/or audio dubbed, optionally trimmed) |
 | `WS /ws/live?language=` | binary: one ~4s audio clip per message        | JSON `{ type: "cues", cues[] }` per window |
 
 FLORES codes: English `eng_Latn`, Kinyarwanda `kin_Latn`.
@@ -125,3 +129,12 @@ FLORES codes: English `eng_Latn`, Kinyarwanda `kin_Latn`.
 - A persistent 403 on a URL fetch/burn usually means the site's bot-check is
   winning even through the player-client fallback — upload the file directly
   instead.
+- Dubbing uses Meta's `facebook/mms-tts-{eng,kin,fra,swh}` (VITS) in the
+  sidecar, lazy-loaded per language on first use — not Coqui/XTTS, which has
+  no Kinyarwanda voice at all. Voice quality is a single generic MMS voice
+  per language, not broadcast-grade or voice-cloned.
+- The sidecar (`inference-py`) now holds NLLB-1.3B + Whisper-Kinyarwanda +
+  MMS-TTS voices at once, which needs real memory headroom — under ~8GB
+  Docker Desktop can OOM-kill the container just loading NLLB, before
+  dubbing is even involved. Give Docker Desktop 10GB+ (Settings → Resources
+  → Memory) if the sidecar keeps dying.
