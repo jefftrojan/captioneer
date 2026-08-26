@@ -269,12 +269,18 @@ def dub(req: DubReq):
     total_samples = int(max(c.end for c in req.cues) * sampling_rate) + sampling_rate
     master = np.zeros(total_samples, dtype=np.float32)
 
-    def synth(text: str, rate: float) -> "np.ndarray":
+    def synth(text: str, rate: float) -> "Optional[np.ndarray]":
         try:
             model.speaking_rate = rate
         except Exception:
             pass
         inputs = tok(text, return_tensors="pt")
+        # Text that's entirely punctuation/emoji/symbols (e.g. "...", "🎵" for
+        # background music) tokenizes to zero valid VITS vocab tokens — an
+        # empty float32 tensor rather than int64, which crashes the model's
+        # embedding lookup. Treat it as silence instead.
+        if inputs["input_ids"].numel() == 0:
+            return None
         with torch.no_grad():
             out = model(**inputs).waveform
         return out.squeeze().cpu().numpy()
@@ -286,6 +292,8 @@ def dub(req: DubReq):
         slot_sec = max(cue.end - cue.start, 0.1)
 
         wav = synth(text, 1.0)
+        if wav is None:
+            continue
         actual_sec = len(wav) / sampling_rate
         if actual_sec > slot_sec:
             needed_rate = min(actual_sec / slot_sec, 1.6)
