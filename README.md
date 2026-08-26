@@ -14,14 +14,36 @@ mbazaNLP** so you can compare a global model against a Kinyarwanda specialist.
   transcribes it into timestamped cues, which you then translate.
 - **YouTube / URL → captions.** Paste a video link; Captioneer grabs the video's
   own captions if present (fast), otherwise downloads the audio (via `yt-dlp`)
-  and transcribes it — then translate as usual.
+  and transcribes it — then translate as usual. If a site blocks the download
+  (bot-check), `yt-dlp` retries through alternate YouTube player clients
+  (`android`/`web`/`tv` by default — configurable via `YT_DLP_PLAYER_CLIENTS`)
+  before giving up.
 - **Two engines, side by side.** NLLB-200 (global, runs on-device) and a
   Digital Umuganda / Mbaza NLLB finetune (Kinyarwanda specialist).
+- **Clip trimming.** Pick a start/end range on the timeline to export or burn
+  just that section instead of the whole video.
 - **Burn captions into the video.** Render the translated subtitles into the
-  video with ffmpeg and download a finished `.mp4` (uploaded video or URL).
+  video with ffmpeg and download a finished `.mp4` (uploaded video or URL,
+  full-length or trimmed to a range).
 - **Live mic → captions.** Talk into the mic and captions fill in every few
   seconds (rolling ~4s windows over a websocket) — then translate as usual.
   Not instant transcription (Whisper needs a finished clip), but close.
+- **Session history.** Every file/video/URL/live session is saved to the
+  browser's local storage (title, cues, translations, render status) so you
+  can pick up a past session without redoing translation.
+
+## Web app pages
+
+The UI (`web/src/pages/`) is a small multi-page workflow, navigated via the
+sidebar (`web/src/Sidebar.tsx`) and shared state in `web/src/workflow.tsx`:
+
+| Page | File | Role |
+|------|------|------|
+| Home | `Home.tsx` | Landing/dashboard |
+| Create | `Create.tsx` | Pick a source: file, video/audio, URL, or live mic |
+| Editor | `Editor.tsx` | Edit cues, translate, trim a clip range (`Timeline.tsx`), preview (`PreviewModal.tsx`), burn/export |
+| Channels | `Channels.tsx` | URL-only intake plus recent YouTube sources |
+| Videos | `Videos.tsx` | Full session history with per-entry export and render status |
 
 ## Architecture
 
@@ -85,8 +107,8 @@ MBAZA_URL=http://localhost:8000                   # sidecar URL (compose overrid
 | `GET /api/engines`  | —                                                 | engines + languages |
 | `POST /api/translate` | `{ texts[], source, target, engine }`           | `{ translations[] }` |
 | `POST /api/transcribe` | multipart `file`, `language`                   | `{ cues[] }` |
-| `POST /api/from-url` | `{ url, language }`                              | `{ cues[], sourceUsed, title }` |
-| `POST /api/burn`    | multipart `srt` + (`video` file or `url`)         | `video/mp4` (captions burned in) |
+| `POST /api/from-url` | `{ url, language, mode? }`                       | `{ cues[], sourceUsed, title, truncated }` |
+| `POST /api/burn`    | multipart `srt` + (`video` file or `url`) + `startSec?`/`endSec?` | `video/mp4` (captions burned in, optionally trimmed) |
 | `WS /ws/live?language=` | binary: one ~4s audio clip per message        | JSON `{ type: "cues", cues[] }` per window |
 
 FLORES codes: English `eng_Latn`, Kinyarwanda `kin_Latn`.
@@ -94,7 +116,12 @@ FLORES codes: English `eng_Latn`, Kinyarwanda `kin_Latn`.
 ## Notes & roadmap
 
 - ASR uses `Xenova/whisper-base` for speed; bump to `whisper-small` for accuracy.
-- Whisper has no native Kinyarwanda — Kinyarwanda **speech** input is a roadmap
-  item via the DU `Whisper-Small-Kinyarwanda` model in the sidecar.
-- Next: burn translated captions back into the video with ffmpeg; inline editing
-  of translations before download.
+- Whisper has no native Kinyarwanda for general speech — spoken Kinyarwanda
+  is routed to the DU `Whisper-Small-Kinyarwanda` model in the sidecar
+  (`transcribeKinyarwanda`), so other languages stay on the fast local model.
+- Session history lives in the browser's local storage only — it's per-device
+  and doesn't sync or back up the original video/audio file, only its cues,
+  translations, and (for URL sources) the source link.
+- A persistent 403 on a URL fetch/burn usually means the site's bot-check is
+  winning even through the player-client fallback — upload the file directly
+  instead.
