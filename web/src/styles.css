@@ -1,30 +1,34 @@
 :root {
-  /* Near-black dashboard theme: mint-green primary accent, coral-orange for
-     the urgent/CTA slot. Replaces the old indigo/gold "sunrise" palette. */
-  --bg: #0a0a0d;
-  --surface: #131316;
-  --surface-2: #0e0e11;
-  --surface-hover: #1a1a1f;
-  --line: rgba(255, 255, 255, 0.09);
-  --line-soft: rgba(255, 255, 255, 0.055);
+  /* Digital Umuganda brand: one saturated green does the talking, navy
+     carries headings/secondary weight, sage tints hover/active surfaces.
+     Source: the Umuganda Style Guide (digitalumuganda.com brand extraction). */
+  --bg: #f6faf8;
+  --surface: #ffffff;
+  --surface-2: #eef3f1;
+  --surface-hover: #e0eee9;
+  --line: #e5e5e5;
+  --line-soft: rgba(24, 34, 37, 0.08);
 
-  --green: #34d399;
-  --green-deep: #0f5132;
-  --card-green-1: #1f8f6e;
-  --card-green-2: #0c3d30;
+  --green: #009263;
+  --green-deep: #00714b;
+  --green-ink: #fafafa;
+  --card-green-1: #00a878;
+  --card-green-2: #00623f;
 
-  --coral: #ff7a52;
-  --coral-deep: #c9432a;
+  --navy: #395f72;
+  --navy-deep: #2c4a5a;
 
-  --ink: #f5f5f7;
-  --muted: #9a9aa5;
-  --muted-dim: #66666f;
-  --danger: #ff6b6b;
+  --ink: #0a0a0a;
+  --muted: #52646b;
+  --muted-dim: #8a9aa0;
+  --danger: #d64545;
+  --danger-deep: #b23636;
 
-  --shadow: 0 18px 50px -20px rgba(0, 0, 0, 0.8);
-  --shadow-sm: 0 8px 24px -14px rgba(0, 0, 0, 0.7);
-  --radius: 20px;
-  --radius-sm: 14px;
+  --shadow: 0 1px 2px rgba(24, 34, 37, 0.04), 0 8px 24px rgba(24, 34, 37, 0.06);
+  --shadow-sm: 0 1px 2px rgba(24, 34, 37, 0.04), 0 4px 12px rgba(24, 34, 37, 0.05);
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-btn: 6px;
 }
 
 * {
@@ -36,17 +40,19 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: "Karla", ui-sans-serif, system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
 body {
-  /* soft glow behind everything: mint upper-left, coral upper-right */
-  background-image:
-    radial-gradient(900px 520px at 6% -6%, rgba(52, 211, 153, 0.14), transparent 55%),
-    radial-gradient(900px 520px at 96% -6%, rgba(255, 122, 82, 0.14), transparent 55%);
-  background-attachment: fixed;
   min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+.display {
+  font-family: "Quicksand", ui-sans-serif, system-ui, sans-serif;
 }
 
 button,
@@ -97,12 +103,12 @@ select {
   border-radius: 50%;
   border: none;
   background: linear-gradient(135deg, var(--green), var(--green-deep));
-  color: #04150d;
+  color: var(--green-ink);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 10px 24px -10px rgba(52, 211, 153, 0.6);
+  box-shadow: 0 10px 24px -10px rgba(0, 146, 99, 0.55);
   transition: transform 0.15s ease;
 }
 .nav-create:hover {
@@ -205,11 +211,12 @@ select {
 .stat-card.green {
   background: linear-gradient(135deg, var(--card-green-1), var(--card-green-2));
   border-color: transparent;
+  color: var(--green-ink);
 }
 .stat-card.coral {
-  background: linear-gradient(135deg, var(--coral), var(--coral-deep));
+  background: linear-gradient(135deg, var(--navy), var(--navy-deep));
   border-color: transparent;
-  color: #200804;
+  color: var(--green-ink);
 }
 .stat-top {
   display: flex;
@@ -268,7 +275,7 @@ select {
   white-space: nowrap;
 }
 .stat-card:not(.green):not(.coral) .stat-pill {
-  background: rgba(52, 211, 153, 0.14);
+  background: rgba(0, 146, 99, 0.12);
   color: var(--green);
 }
 
@@ -298,7 +305,7 @@ select {
 }
 .card-head .link {
   font-size: 12.5px;
-  color: var(--coral);
+  color: var(--navy);
   text-decoration: none;
   cursor: pointer;
   background: none;
@@ -392,7 +399,7 @@ select {
   font-size: 11px;
   font-weight: 600;
   color: var(--green);
-  background: rgba(52, 211, 153, 0.12);
+  background: rgba(0, 146, 99, 0.12);
   border-radius: 999px;
   padding: 3px 8px;
   white-space: nowrap;
@@ -404,7 +411,7 @@ select {
   font-size: 11px;
   font-weight: 600;
   color: var(--muted-dim);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   border-radius: 999px;
   padding: 3px 8px;
   white-space: nowrap;
@@ -412,7 +419,7 @@ select {
 
 /* ---------- generic panel/card ---------- */
 .panel {
-  background: linear-gradient(180deg, var(--surface), var(--surface-2));
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -451,12 +458,12 @@ select {
 .wizard-step.active .num {
   background: var(--green);
   border-color: var(--green);
-  color: #04150d;
+  color: var(--green-ink);
 }
 .wizard-step.done .num {
   background: var(--green-deep);
   border-color: var(--green-deep);
-  color: var(--ink);
+  color: var(--green-ink);
 }
 .wizard-sep {
   width: 24px;
@@ -505,7 +512,7 @@ select {
 }
 .source-card.active {
   border-color: var(--green);
-  background: rgba(52, 211, 153, 0.08);
+  background: rgba(0, 146, 99, 0.06);
   color: var(--ink);
 }
 .source-title {
@@ -580,9 +587,9 @@ select {
 
 /* ---------- live recording ---------- */
 .btn.live-active {
-  background: linear-gradient(135deg, var(--danger), #c94d4d);
+  background: linear-gradient(135deg, var(--danger), var(--danger-deep));
   border: none;
-  color: #200606;
+  color: var(--green-ink);
   font-weight: 600;
 }
 .rec-dot {
@@ -591,7 +598,7 @@ select {
   height: 8px;
   margin-right: 6px;
   border-radius: 50%;
-  background: #200606;
+  background: var(--green-ink);
   animation: rec-pulse 1.2s ease-in-out infinite;
 }
 @keyframes rec-pulse {
@@ -612,14 +619,14 @@ select {
   padding: 26px 18px;
   cursor: pointer;
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.015);
+  background: var(--surface-2);
   transition: all 0.18s ease;
 }
 .dropzone:hover,
 .dropzone.drag {
   border-color: var(--green);
   color: var(--ink);
-  background: rgba(52, 211, 153, 0.06);
+  background: rgba(0, 146, 99, 0.05);
 }
 .dropzone .dz-icon {
   width: 26px;
@@ -714,15 +721,15 @@ select:focus {
   box-shadow: 0 0 8px var(--green);
 }
 .status.wait .dot {
-  background: var(--coral);
-  box-shadow: 0 0 8px var(--coral);
+  background: var(--navy);
+  box-shadow: 0 0 8px var(--navy);
   animation: pulse 1.2s infinite;
 }
 .status.ok {
   color: var(--green);
 }
 .status.wait {
-  color: var(--coral);
+  color: var(--navy);
 }
 @keyframes pulse {
   0%,
@@ -735,12 +742,14 @@ select:focus {
 }
 
 /* ---------- buttons ---------- */
+/* Brand spec: Quicksand 600/14px label, 6px radius — the one recurring
+   geometry across every CTA on the Digital Umuganda site. */
 .btn {
-  font: inherit;
+  font-family: "Quicksand", sans-serif;
   font-size: 14px;
-  font-weight: 550;
-  border-radius: 12px;
-  padding: 12px 16px;
+  font-weight: 600;
+  border-radius: var(--radius-btn);
+  padding: 10px 18px;
   cursor: pointer;
   border: 1px solid var(--line);
   background: var(--surface-hover);
@@ -756,13 +765,12 @@ select:focus {
 }
 .btn.primary {
   border: none;
-  background: linear-gradient(135deg, var(--coral), var(--coral-deep));
-  color: #fff;
-  font-weight: 600;
-  box-shadow: 0 10px 26px -12px rgba(255, 122, 82, 0.7);
+  background: var(--green);
+  color: var(--green-ink);
+  box-shadow: 0 10px 26px -12px rgba(0, 146, 99, 0.55);
 }
 .btn.primary:hover:not(:disabled) {
-  filter: brightness(1.05);
+  background: var(--green-deep);
 }
 .btn:disabled {
   opacity: 0.5;
@@ -770,10 +778,12 @@ select:focus {
 }
 .btn.burn {
   width: 100%;
-  background: linear-gradient(135deg, var(--green), var(--green-deep));
+  background: var(--green);
   border: none;
-  color: #04150d;
-  font-weight: 600;
+  color: var(--green-ink);
+}
+.btn.burn:hover:not(:disabled) {
+  background: var(--green-deep);
 }
 .export-row {
   display: flex;
@@ -801,7 +811,7 @@ select:focus {
 .progress .fill {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--green), var(--coral));
+  background: linear-gradient(90deg, var(--green-deep), var(--green));
   transition: width 0.3s ease;
 }
 .progress .label {
@@ -819,11 +829,11 @@ select:focus {
   padding-top: 14px;
 }
 .error {
-  color: var(--danger);
+  color: var(--danger-deep);
   font-size: 13px;
   margin: 0;
-  background: rgba(255, 107, 107, 0.08);
-  border: 1px solid rgba(255, 107, 107, 0.25);
+  background: rgba(214, 69, 69, 0.08);
+  border: 1px solid rgba(214, 69, 69, 0.25);
   border-radius: 10px;
   padding: 9px 11px;
 }
@@ -900,7 +910,7 @@ select:focus {
   font-size: 11px;
   font-weight: 600;
   color: var(--green);
-  background: rgba(52, 211, 153, 0.12);
+  background: rgba(0, 146, 99, 0.12);
   border-radius: 6px;
   padding: 2px 7px;
   font-variant-numeric: tabular-nums;
@@ -954,7 +964,7 @@ textarea.cue-tgt {
 }
 textarea.cue-src:hover,
 textarea.cue-tgt:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-2);
 }
 textarea.cue-src:focus,
 textarea.cue-tgt:focus {
@@ -1038,13 +1048,13 @@ textarea.cue-tgt::placeholder {
   transition: background 0.15s ease, outline-color 0.15s ease;
 }
 .timeline-seg.pending {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--line);
 }
 .timeline-seg.done {
   background: var(--green);
 }
 .timeline-seg.active {
-  background: var(--coral);
+  background: var(--navy);
   animation: seg-pulse 1s ease-in-out infinite;
 }
 .timeline-seg.selected {
@@ -1058,19 +1068,19 @@ textarea.cue-tgt::placeholder {
 }
 .timeline-seg.has-thumb.pending {
   border-bottom-color: var(--muted-dim);
-  filter: grayscale(0.3) brightness(0.7);
+  filter: grayscale(0.3) brightness(0.95);
 }
 .timeline-seg.has-thumb.done {
   border-bottom-color: var(--green);
 }
 .timeline-seg.has-thumb.active {
-  border-bottom-color: var(--coral);
+  border-bottom-color: var(--navy);
 }
 .timeline-range {
   position: absolute;
   top: 0;
   bottom: 0;
-  background: rgba(52, 211, 153, 0.14);
+  background: rgba(0, 146, 99, 0.12);
   border-left: 2px solid var(--green);
   border-right: 2px solid var(--green);
   pointer-events: none;
@@ -1085,7 +1095,7 @@ textarea.cue-tgt::placeholder {
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
   padding: 16px 18px;
-  background: rgba(255, 255, 255, 0.015);
+  background: var(--surface-2);
 }
 .detail-head {
   display: flex;
@@ -1123,8 +1133,8 @@ textarea.cue-tgt::placeholder {
 
 /* ---------- warnings & inline actions ---------- */
 .warn-banner {
-  border: 1px solid rgba(255, 122, 82, 0.3);
-  background: rgba(255, 122, 82, 0.08);
+  border: 1px solid rgba(57, 95, 114, 0.3);
+  background: rgba(57, 95, 114, 0.08);
   border-radius: 10px;
   padding: 12px;
   display: flex;
