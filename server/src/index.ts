@@ -12,6 +12,8 @@ import { defaultEngine, getEngine, listEngines } from "./engines/registry.js";
 import { transcribe, transcribeKinyarwanda, warmupAsr } from "./asr.js";
 import { fetchFromUrl } from "./urlfetch.js";
 import { burnSubtitles } from "./burn.js";
+import { synthesizeDub } from "./dub.js";
+import { parseSubtitles } from "./subtitles.js";
 import { handleLiveConnection } from "./live.js";
 
 // Load .env from the server dir or the repo root (no-op in containers where
@@ -116,22 +118,37 @@ app.post("/api/from-url", async (req, res) => {
 });
 
 // Burn translated captions into the video (uploaded file or URL) -> MP4.
+// Optionally dubs the audio too (see `dub`/`dubTarget` below).
 app.post("/api/burn", upload.single("video"), async (req, res) => {
   try {
     const srt = req.body?.srt as string;
     const url = req.body?.url as string | undefined;
     const startSec = req.body?.startSec != null ? Number(req.body.startSec) : undefined;
     const endSec = req.body?.endSec != null ? Number(req.body.endSec) : undefined;
+    const dub = req.body?.dub === "true";
+    const dubTarget = req.body?.dubTarget as string | undefined;
+    const burnCaptions = req.body?.burnCaptions !== "false";
     if (!srt) return res.status(400).json({ error: "Missing subtitles (srt)" });
     if (!req.file && !url) {
       return res.status(400).json({ error: "Provide a video file or a url" });
     }
+    if (dub && !dubTarget) {
+      return res.status(400).json({ error: "Missing dubTarget language for dubbing" });
+    }
+    // Dub audio is synthesized from the exact same parsed cues as `srt`, so
+    // it always lands on whichever timeline convention (absolute vs.
+    // 0-based-rebased) the caller already used for the burned captions.
+    const dubAudioBuf = dub
+      ? await synthesizeDub(parseSubtitles(srt), dubTarget!)
+      : undefined;
     const { outPath, dir } = await burnSubtitles({
       videoBuf: req.file?.buffer,
       url,
       srt,
       startSec,
       endSec,
+      burnCaptions,
+      dubAudioBuf,
     });
     res.setHeader("Content-Type", "video/mp4");
     res.setHeader("Content-Disposition", 'attachment; filename="captioned.mp4"');

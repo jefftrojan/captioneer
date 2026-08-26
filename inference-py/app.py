@@ -9,7 +9,7 @@ import os
 import threading
 from typing import List, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
@@ -23,8 +23,12 @@ app = FastAPI(title="Captioneer Mbaza sidecar")
 
 _translate = {"ready": False, "tok": None, "model": None, "error": None}
 _asr = {"ready": False, "pipe": None, "error": None}
+# Keyed by ISO 639-3 code (the FLORES target code's prefix, e.g. "kin" from
+# "kin_Latn" — conveniently identical to the code MMS-TTS repos use).
+_tts = {"models": {}, "tokenizers": {}, "errors": {}}
 _lock = threading.Lock()
 _asr_lock = threading.Lock()
+_tts_lock = threading.Lock()
 
 
 def _load_translate():
@@ -112,6 +116,33 @@ def _load_asr():
             print(f"[mbaza] ASR load failed: {e}", flush=True)
 
 
+def _load_tts(lang_code: str):
+    """Lazy-load a Meta MMS-TTS voice for one language (VITS, Latin-script,
+    ISO 639-3 code — e.g. "kin" for Kinyarwanda). MMS is the only broadly
+    available open TTS with real Kinyarwanda coverage, which is why dubbing
+    uses it instead of a Coqui/XTTS voice (XTTS's language list has no
+    Kinyarwanda)."""
+    if lang_code in _tts["models"] or lang_code in _tts["errors"]:
+        return
+    with _tts_lock:
+        if lang_code in _tts["models"] or lang_code in _tts["errors"]:
+            return
+        try:
+            from transformers import AutoTokenizer, VitsModel
+
+            repo = f"facebook/mms-tts-{lang_code}"
+            print(f"[tts] loading {repo} …", flush=True)
+            tok = AutoTokenizer.from_pretrained(repo, token=HF_TOKEN)
+            model = VitsModel.from_pretrained(repo, token=HF_TOKEN)
+            model.eval()
+            _tts["tokenizers"][lang_code] = tok
+            _tts["models"][lang_code] = model
+            print(f"[tts] {repo} ready", flush=True)
+        except Exception as e:  # pragma: no cover - surfaced via /dub
+            _tts["errors"][lang_code] = str(e)
+            print(f"[tts] load failed for {lang_code}: {e}", flush=True)
+
+
 @app.on_event("startup")
 def _startup():
     threading.Thread(target=_load_translate, daemon=True).start()
@@ -127,6 +158,7 @@ def health():
         "asr_error": _asr["error"],
         "model": MBAZA_MODEL,
         "asr_model": MBAZA_ASR_MODEL,
+        "tts_languages_loaded": sorted(_tts["models"].keys()),
     }
 
 
@@ -193,3 +225,79 @@ def transcribe(req: TranscribeReq):
         {"timestamp": [0, None], "text": result.get("text", "")}
     ]
     return {"chunks": chunks}
+
+
+class DubCue(BaseModel):
+    text: str
+    start: float
+    end: float
+
+
+class DubReq(BaseModel):
+    cues: List[DubCue]
+    # FLORES target code (e.g. "kin_Latn") — only the ISO 639-3 prefix is
+    # used, which happens to match the MMS-TTS repo suffix directly.
+    target: str
+
+
+@app.post("/dub")
+def dub(req: DubReq):
+    """Synthesize one continuous dub track (WAV) spanning all cues, each
+    placed at its own start time. A cue whose speech runs longer than its
+    slot is re-synthesized faster (capped at 1.6x) to fit; beyond that cap
+    it's left to overflow slightly rather than distort the voice further. A
+    cue that finishes early just leaves natural silence in its slot."""
+    lang_code = req.target.split("_")[0].lower()
+    _load_tts(lang_code)
+    if lang_code in _tts["errors"]:
+        raise HTTPException(status_code=500, detail=_tts["errors"][lang_code])
+    if lang_code not in _tts["models"]:
+        raise HTTPException(status_code=503, detail="TTS model still loading")
+    if not req.cues:
+        raise HTTPException(status_code=400, detail="No cues to dub")
+
+    import io
+
+    import numpy as np
+    import torch
+    from scipy.io import wavfile
+
+    model = _tts["models"][lang_code]
+    tok = _tts["tokenizers"][lang_code]
+    sampling_rate = model.config.sampling_rate
+
+    total_samples = int(max(c.end for c in req.cues) * sampling_rate) + sampling_rate
+    master = np.zeros(total_samples, dtype=np.float32)
+
+    def synth(text: str, rate: float) -> "np.ndarray":
+        try:
+            model.speaking_rate = rate
+        except Exception:
+            pass
+        inputs = tok(text, return_tensors="pt")
+        with torch.no_grad():
+            out = model(**inputs).waveform
+        return out.squeeze().cpu().numpy()
+
+    for cue in req.cues:
+        text = cue.text.strip()
+        if not text:
+            continue
+        slot_sec = max(cue.end - cue.start, 0.1)
+
+        wav = synth(text, 1.0)
+        actual_sec = len(wav) / sampling_rate
+        if actual_sec > slot_sec:
+            needed_rate = min(actual_sec / slot_sec, 1.6)
+            wav = synth(text, needed_rate)
+
+        start_idx = int(cue.start * sampling_rate)
+        end_idx = min(start_idx + len(wav), len(master))
+        if end_idx > start_idx:
+            master[start_idx:end_idx] += wav[: end_idx - start_idx]
+
+    peak = float(np.max(np.abs(master))) or 1.0
+    pcm16 = (np.clip(master / peak, -1.0, 1.0) * 32767).astype(np.int16)
+    buf = io.BytesIO()
+    wavfile.write(buf, sampling_rate, pcm16)
+    return Response(content=buf.getvalue(), media_type="audio/wav")

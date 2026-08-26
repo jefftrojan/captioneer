@@ -71,7 +71,7 @@ function secToStamp(sec: number): string {
   return `${p(h)}:${p(m)}:${p(s)},${p(ms, 3)}`;
 }
 
-function stampToSec(stamp: string): number {
+export function stampToSec(stamp: string): number {
   const m = stamp.match(/(\d+):(\d{2}):(\d{2})[.,](\d{3})/);
   if (!m) return 0;
   const [, h, mi, s, ms] = m;

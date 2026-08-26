@@ -68,6 +68,12 @@ export async function burnVideo(params: {
   url?: string;
   startSec?: number;
   endSec?: number;
+  /** Replace the audio track with a synthesized dub in `dubTarget`
+   * (FLORES code, e.g. "kin_Latn") instead of the source's original audio. */
+  dub?: boolean;
+  dubTarget?: string;
+  /** Set false to skip the on-screen caption overlay (e.g. dub-only). */
+  burnCaptions?: boolean;
 }): Promise<Blob> {
   const form = new FormData();
   form.append("srt", params.srt);
@@ -75,6 +81,11 @@ export async function burnVideo(params: {
   if (params.url) form.append("url", params.url);
   if (params.startSec != null) form.append("startSec", String(params.startSec));
   if (params.endSec != null) form.append("endSec", String(params.endSec));
+  if (params.dub) {
+    form.append("dub", "true");
+    form.append("dubTarget", params.dubTarget ?? "");
+  }
+  if (params.burnCaptions === false) form.append("burnCaptions", "false");
   const r = await fetch("/api/burn", { method: "POST", body: form });
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));

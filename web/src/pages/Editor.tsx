@@ -204,14 +204,35 @@ export default function Editor() {
           )}
 
           {wf.hasOutput && wf.hasVideoSource && (
-            <button className="btn burn" onClick={wf.burnHandler} disabled={wf.burning}>
-              <Clapperboard size={16} />
-              {wf.burning
-                ? "Rendering video…"
-                : wf.rangeStart != null && wf.rangeEnd != null
-                  ? "Captioned clip (.mp4)"
-                  : "Captioned video (.mp4)"}
-            </button>
+            <div className="dub-control">
+              <label className="dub-toggle">
+                <input
+                  type="checkbox"
+                  checked={wf.dubEnabled}
+                  onChange={(e) => wf.setDubEnabled(e.target.checked)}
+                />
+                Dub audio into {wf.langName(wf.target)}
+              </label>
+              <button className="btn burn" onClick={wf.burnHandler} disabled={wf.burning}>
+                <Clapperboard size={16} />
+                {wf.burning
+                  ? wf.dubEnabled
+                    ? "Rendering & dubbing…"
+                    : "Rendering video…"
+                  : [
+                      wf.dubEnabled ? "Dubbed" : "Captioned",
+                      wf.rangeStart != null && wf.rangeEnd != null ? "clip" : "video",
+                      "(.mp4)",
+                    ].join(" ")}
+              </button>
+              {wf.dubEnabled && (
+                <p className="hint">
+                  Synthesized speech (Meta MMS-TTS) replaces the original
+                  audio — voice quality and timing are approximate, not
+                  broadcast-grade.
+                </p>
+              )}
+            </div>
           )}
 
           {wf.error && <p className="error">{wf.error}</p>}

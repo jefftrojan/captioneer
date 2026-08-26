@@ -45,9 +45,17 @@ export async function burnSubtitles(opts: {
    * sees it (0-based). See the `needsFfmpegTrim` branch below. */
   startSec?: number;
   endSec?: number;
+  /** Whether to burn `srt` in as an on-screen overlay. Default true — set
+   * false for a dub-only render with no visible captions. */
+  burnCaptions?: boolean;
+  /** Replaces the source's original audio track entirely (dubbing). Built
+   * against the same absolute timeline as `srt`/the trim range, so it trims
+   * identically alongside the video when a range is set. */
+  dubAudioBuf?: Buffer;
 }): Promise<BurnResult> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "captioneer-burn-"));
   const ranged = opts.startSec != null && opts.endSec != null;
+  const burnCaptions = opts.burnCaptions ?? true;
 
   let videoName: string;
   if (opts.videoBuf) {
@@ -61,7 +69,15 @@ export async function burnSubtitles(opts: {
     throw new Error("No video provided to burn captions into.");
   }
 
-  await writeFile(path.join(dir, "subs.srt"), opts.srt, "utf8");
+  if (burnCaptions) {
+    await writeFile(path.join(dir, "subs.srt"), opts.srt, "utf8");
+  }
+
+  let dubName: string | undefined;
+  if (opts.dubAudioBuf) {
+    dubName = "dub.wav";
+    await writeFile(path.join(dir, dubName), opts.dubAudioBuf);
+  }
 
   // Trim goes AFTER -i (output-referenced seeking) rather than before: it's
   // slower (decodes from the start and discards) but avoids keyframe-boundary
@@ -78,13 +94,27 @@ export async function burnSubtitles(opts: {
     ? ["-ss", String(opts.startSec), "-to", String(opts.endSec), "-avoid_negative_ts", "make_zero"]
     : [];
 
+  // dub.wav was built against the same absolute timeline as the video (and
+  // as subs.srt/the trim range), so a single output-level trimArgs — applied
+  // once here, after both -i's — cuts both streams to the same window.
+  const dubInputArgs = dubName ? ["-i", dubName] : [];
+  const mapArgs = dubName ? ["-map", "0:v", "-map", "1:a"] : [];
+  const vfArgs = burnCaptions ? ["-vf", `subtitles=subs.srt:${FORCE_STYLE}`] : [];
+  // The dub track is padded ~1s past the last cue's end (see the sidecar's
+  // /dub), which can run slightly longer than the video — bound the output
+  // to the video's own length so the picture doesn't freeze on a trailing
+  // audio-only tail.
+  const shortestArgs = dubName ? ["-shortest"] : [];
+
   await runFfmpeg(
     [
       "-i",
       videoName,
+      ...dubInputArgs,
       ...trimArgs,
-      "-vf",
-      `subtitles=subs.srt:${FORCE_STYLE}`,
+      ...mapArgs,
+      ...vfArgs,
+      ...shortestArgs,
       "-c:v",
       "libx264",
       "-preset",

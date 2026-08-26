@@ -118,6 +118,8 @@ interface WorkflowState {
 
   burning: boolean;
   burnHandler: () => Promise<void>;
+  dubEnabled: boolean;
+  setDubEnabled: (v: boolean) => void;
 
   error: string | null;
   setError: (e: string | null) => void;
@@ -153,6 +155,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [urlNote, setUrlNote] = useState<string | null>(null);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [burning, setBurning] = useState(false);
+  const [dubEnabled, setDubEnabled] = useState(false);
   const [live, setLive] = useState(false);
   const liveStopRef = useRef<(() => void) | null>(null);
   const [cues, setCues] = useState<Cue[]>([]);
@@ -552,12 +555,15 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
         url: intakeMode === "url" ? url.trim() : undefined,
         startSec: ranged ? rangeStart! : undefined,
         endSec: ranged ? rangeEnd! : undefined,
+        dub: dubEnabled,
+        dubTarget: dubEnabled ? target : undefined,
       });
       const base = filename.replace(/\.(srt|vtt)$/i, "");
       const suffix = ranged ? ".clip" : "";
+      const dubTag = dubEnabled ? ".dubbed" : "";
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `${base}.${target.split("_")[0]}${suffix}.captioned.mp4`;
+      a.download = `${base}.${target.split("_")[0]}${suffix}${dubTag}.captioned.mp4`;
       a.click();
       URL.revokeObjectURL(a.href);
       if (currentEntry) {
@@ -650,6 +656,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     clearRange,
     burning,
     burnHandler,
+    dubEnabled,
+    setDubEnabled,
     error,
     setError,
     langName,

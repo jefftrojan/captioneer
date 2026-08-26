@@ -1207,6 +1207,27 @@ textarea.cue-tgt::placeholder {
   padding: 9px;
 }
 
+/* ---------- dubbing ---------- */
+.dub-control {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dub-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.dub-toggle input[type="checkbox"] {
+  accent-color: var(--green);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
 /* ---------- preview modal ---------- */
 .modal-backdrop {
   position: fixed;
