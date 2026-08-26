@@ -43,6 +43,25 @@ export function parseSubtitles(content: string): Cue[] {
   return cues;
 }
 
+/** Parse a "HH:MM:SS,mmm" or "HH:MM:SS.mmm" timestamp to seconds. */
+export function parseTimeToSeconds(stamp: string): number {
+  const m = stamp.match(/(\d+):(\d{2}):(\d{2})[.,](\d{3})/);
+  if (!m) return 0;
+  const [, h, mi, s, ms] = m;
+  return Number(h) * 3600 + Number(mi) * 60 + Number(s) + Number(ms) / 1000;
+}
+
+/** Format seconds as an SRT-style "HH:MM:SS,mmm" timestamp. */
+export function secondsToTimestamp(sec: number): string {
+  if (sec < 0 || Number.isNaN(sec)) sec = 0;
+  const ms = Math.round((sec % 1) * 1000);
+  const s = Math.floor(sec) % 60;
+  const m = Math.floor(sec / 60) % 60;
+  const h = Math.floor(sec / 3600);
+  const p = (n: number, w = 2) => String(n).padStart(w, "0");
+  return `${p(h)}:${p(m)}:${p(s)},${p(ms, 3)}`;
+}
+
 function toSrtTime(t: string): string {
   return t.replace(".", ",");
 }

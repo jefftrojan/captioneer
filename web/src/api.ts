@@ -66,11 +66,15 @@ export async function burnVideo(params: {
   srt: string;
   file?: File;
   url?: string;
+  startSec?: number;
+  endSec?: number;
 }): Promise<Blob> {
   const form = new FormData();
   form.append("srt", params.srt);
   if (params.file) form.append("video", params.file);
   if (params.url) form.append("url", params.url);
+  if (params.startSec != null) form.append("startSec", String(params.startSec));
+  if (params.endSec != null) form.append("endSec", String(params.endSec));
   const r = await fetch("/api/burn", { method: "POST", body: form });
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
@@ -106,11 +110,13 @@ export async function translate(
   source: string,
   target: string,
   engine: string,
+  signal?: AbortSignal,
 ): Promise<string[]> {
   const r = await fetch("/api/translate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ texts, source, target, engine }),
+    signal,
   });
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));

@@ -120,6 +120,8 @@ app.post("/api/burn", upload.single("video"), async (req, res) => {
   try {
     const srt = req.body?.srt as string;
     const url = req.body?.url as string | undefined;
+    const startSec = req.body?.startSec != null ? Number(req.body.startSec) : undefined;
+    const endSec = req.body?.endSec != null ? Number(req.body.endSec) : undefined;
     if (!srt) return res.status(400).json({ error: "Missing subtitles (srt)" });
     if (!req.file && !url) {
       return res.status(400).json({ error: "Provide a video file or a url" });
@@ -128,6 +130,8 @@ app.post("/api/burn", upload.single("video"), async (req, res) => {
       videoBuf: req.file?.buffer,
       url,
       srt,
+      startSec,
+      endSec,
     });
     res.setHeader("Content-Type", "video/mp4");
     res.setHeader("Content-Disposition", 'attachment; filename="captioned.mp4"');

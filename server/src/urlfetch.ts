@@ -10,6 +10,16 @@ const YT = process.env.YT_DLP_PATH ?? "yt-dlp";
 // path is unaffected (it grabs the whole track instantly).
 const ASR_SECONDS = Number(process.env.URL_ASR_SECONDS ?? 180);
 
+// YouTube's default (web) player client requires deciphering a signature
+// that breaks often and increasingly draws 403s from anonymous requests.
+// Falling back through android/tv clients (which use simpler, less
+// throttled playback URLs) sidesteps that without needing any credentials.
+const PLAYER_CLIENTS = process.env.YT_DLP_PLAYER_CLIENTS ?? "android,web,tv";
+
+function playerClientArgs(): string[] {
+  return ["--extractor-args", `youtube:player_client=${PLAYER_CLIENTS}`];
+}
+
 export type SourceUsed = "subtitles" | "asr";
 export interface UrlResult {
   cues: AsrCue[];
@@ -94,6 +104,7 @@ async function trySubtitles(
   const code = SUB_LANG[language] ?? "en";
   const r = await run(
     [
+      ...playerClientArgs(),
       "--skip-download",
       "--no-warnings",
       "--write-subs",
@@ -127,6 +138,7 @@ async function trySubtitles(
 
 async function downloadAudio(dir: string, url: string): Promise<string> {
   const base = [
+    ...playerClientArgs(),
     "-x",
     "--audio-format",
     "wav",
@@ -149,14 +161,30 @@ async function downloadAudio(dir: string, url: string): Promise<string> {
     files = await readdir(dir).catch(() => [] as string[]);
   }
   const wav = files.find((f) => f.endsWith(".wav"));
-  if (!wav) throw new Error(friendlyError(r.stderr));
+  if (!wav) {
+    console.error("[yt-dlp] downloadAudio raw stderr:\n", r.stderr);
+    throw new Error(friendlyError(r.stderr));
+  }
   return path.join(dir, wav);
 }
 
-/** Download a (clipped) video by URL for caption burn-in. Returns the file path. */
-export async function downloadVideoClip(dir: string, url: string): Promise<string> {
+/**
+ * Download a (clipped) video by URL. When `startSec`/`endSec` are given,
+ * yt-dlp fetches exactly that section — the returned file already starts at
+ * t=0 for that range (no separate ffmpeg-level trim needed on top; the
+ * caller must not re-apply -ss/-to to this file). Without a range, this
+ * keeps today's default-clip behavior (first `ASR_SECONDS`, falling back to
+ * the full video) for whole-video burns.
+ */
+export async function downloadVideoClip(
+  dir: string,
+  url: string,
+  startSec?: number,
+  endSec?: number,
+): Promise<string> {
   ensureHttpUrl(url);
   const base = [
+    ...playerClientArgs(),
     "-f",
     "bv*+ba/b",
     "--merge-output-format",
@@ -168,6 +196,22 @@ export async function downloadVideoClip(dir: string, url: string): Promise<strin
     "video.%(ext)s",
     url,
   ];
+
+  if (startSec != null && endSec != null) {
+    // A specific range was requested (time-range export/burn) — fetch just
+    // that section. No full-video fallback here: silently downloading a
+    // potentially huge whole video when the user asked for a short clip
+    // would be a surprising, slow bait-and-switch; surface the error instead.
+    const r = await run(["--download-sections", `*${startSec}-${endSec}`, ...base], 420_000);
+    const files = await readdir(dir).catch(() => [] as string[]);
+    const vid = files.find((f) => f.startsWith("video."));
+    if (!vid) {
+      console.error("[yt-dlp] downloadVideoClip (ranged) raw stderr:\n", r.stderr);
+      throw new Error(friendlyError(r.stderr));
+    }
+    return path.join(dir, vid);
+  }
+
   let r = await run(["--download-sections", `*0-${ASR_SECONDS}`, ...base], 420_000);
   let files = await readdir(dir).catch(() => [] as string[]);
   if (!files.some((f) => f.startsWith("video."))) {
@@ -175,7 +219,10 @@ export async function downloadVideoClip(dir: string, url: string): Promise<strin
     files = await readdir(dir).catch(() => [] as string[]);
   }
   const vid = files.find((f) => f.startsWith("video."));
-  if (!vid) throw new Error(friendlyError(r.stderr));
+  if (!vid) {
+    console.error("[yt-dlp] downloadVideoClip raw stderr:\n", r.stderr);
+    throw new Error(friendlyError(r.stderr));
+  }
   return path.join(dir, vid);
 }
 
