@@ -80,6 +80,10 @@ export async function burnVideo(params: {
    * (FLORES code, e.g. "kin_Latn") instead of the source's original audio. */
   dub?: boolean;
   dubTarget?: string;
+  /** Music-video mode: keep the instrumental (source separation) and mix
+   * narration onto it instead of replacing the whole mix. Not sung dubbing —
+   * spoken narration over the original music bed. Only meaningful with dub. */
+  dubMusic?: boolean;
   /** Set false to skip the on-screen caption overlay (e.g. dub-only). */
   burnCaptions?: boolean;
 }): Promise<Blob> {
@@ -92,6 +96,7 @@ export async function burnVideo(params: {
   if (params.dub) {
     form.append("dub", "true");
     form.append("dubTarget", params.dubTarget ?? "");
+    if (params.dubMusic) form.append("dubMusic", "true");
   }
   if (params.burnCaptions === false) form.append("burnCaptions", "false");
   const r = await fetch("/api/burn", { method: "POST", body: form });

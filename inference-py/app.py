@@ -9,7 +9,7 @@ import os
 import threading
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
@@ -18,6 +18,18 @@ MBAZA_ASR_MODEL = os.environ.get("MBAZA_ASR_MODEL", "mbazaNLP/Whisper-Small-Kiny
 # Greedy by default: this is a 1.3B model on CPU, where 4-beam search is ~4x
 # slower (~80s/sentence). Bump MBAZA_NUM_BEAMS on a GPU host for quality.
 MBAZA_NUM_BEAMS = int(os.environ.get("MBAZA_NUM_BEAMS", "1"))
+# htdemucs, not the "extra"/"_q" bag-of-models variants: those are
+# ensembles of 3-4 full models, and constructing each one (plain PyTorch
+# weight init, before the pretrained weights even load) took minutes on
+# this CPU-only sidecar — a one-time cost per process, but bad enough to
+# risk the request that pays it timing out. htdemucs is a single model:
+# ~18s to load. Separation itself is still slow on CPU either way (~6-7x
+# real-time here) — dub-music's HTTP timeouts are sized for that.
+DEMUCS_MODEL = os.environ.get("DEMUCS_MODEL", "htdemucs")
+# How much to duck the instrumental under the narration, and how loud the
+# narration sits on top — plain gain, no dynamic ducking (that would need
+# per-cue envelope shaping, a bigger job than this first pass warrants).
+DUB_MUSIC_INSTRUMENTAL_GAIN = float(os.environ.get("DUB_MUSIC_INSTRUMENTAL_GAIN", "0.45"))
 
 app = FastAPI(title="Captioneer Mbaza sidecar")
 
@@ -26,9 +38,11 @@ _asr = {"ready": False, "pipe": None, "error": None}
 # Keyed by ISO 639-3 code (the FLORES target code's prefix, e.g. "kin" from
 # "kin_Latn" — conveniently identical to the code MMS-TTS repos use).
 _tts = {"models": {}, "tokenizers": {}, "errors": {}}
+_demucs = {"model": None, "error": None}
 _lock = threading.Lock()
 _asr_lock = threading.Lock()
 _tts_lock = threading.Lock()
+_demucs_lock = threading.Lock()
 
 
 def _load_translate():
@@ -143,6 +157,29 @@ def _load_tts(lang_code: str):
             print(f"[tts] load failed for {lang_code}: {e}", flush=True)
 
 
+def _load_demucs():
+    """Lazy-load Demucs (source separation) for /dub-music — never touched
+    by plain dubbing, so sessions that don't use it pay nothing. Uses the
+    low-level pretrained/apply API, not demucs.api.Separator — that module
+    doesn't exist in demucs==4.0.1 (added in a later release)."""
+    if _demucs["model"] or _demucs["error"]:
+        return
+    with _demucs_lock:
+        if _demucs["model"] or _demucs["error"]:
+            return
+        try:
+            from demucs.pretrained import get_model
+
+            print(f"[demucs] loading {DEMUCS_MODEL} …", flush=True)
+            model = get_model(DEMUCS_MODEL)
+            model.eval()
+            _demucs["model"] = model
+            print("[demucs] ready", flush=True)
+        except Exception as e:  # pragma: no cover - surfaced via /dub-music
+            _demucs["error"] = str(e)
+            print(f"[demucs] load failed: {e}", flush=True)
+
+
 @app.on_event("startup")
 def _startup():
     threading.Thread(target=_load_translate, daemon=True).start()
@@ -240,33 +277,31 @@ class DubReq(BaseModel):
     target: str
 
 
-@app.post("/dub")
-def dub(req: DubReq):
-    """Synthesize one continuous dub track (WAV) spanning all cues, each
-    placed at its own start time. A cue whose speech runs longer than its
-    slot is re-synthesized faster (capped at 1.6x) to fit; beyond that cap
-    it's left to overflow slightly rather than distort the voice further. A
-    cue that finishes early just leaves natural silence in its slot."""
-    lang_code = req.target.split("_")[0].lower()
+def _synthesize_narration_track(cues: "List[DubCue]", target: str):
+    """Shared by /dub and /dub-music: synthesize one continuous mono
+    narration track (raw float32, NOT normalized/encoded yet) spanning all
+    cues, each placed at its own start time. A cue whose speech runs longer
+    than its slot is re-synthesized faster (capped at 1.6x) to fit; beyond
+    that cap it's left to overflow slightly rather than distort the voice
+    further. A cue that finishes early just leaves natural silence in its
+    slot. Returns (waveform, sampling_rate)."""
+    lang_code = target.split("_")[0].lower()
     _load_tts(lang_code)
     if lang_code in _tts["errors"]:
         raise HTTPException(status_code=500, detail=_tts["errors"][lang_code])
     if lang_code not in _tts["models"]:
         raise HTTPException(status_code=503, detail="TTS model still loading")
-    if not req.cues:
+    if not cues:
         raise HTTPException(status_code=400, detail="No cues to dub")
-
-    import io
 
     import numpy as np
     import torch
-    from scipy.io import wavfile
 
     model = _tts["models"][lang_code]
     tok = _tts["tokenizers"][lang_code]
     sampling_rate = model.config.sampling_rate
 
-    total_samples = int(max(c.end for c in req.cues) * sampling_rate) + sampling_rate
+    total_samples = int(max(c.end for c in cues) * sampling_rate) + sampling_rate
     master = np.zeros(total_samples, dtype=np.float32)
 
     def synth(text: str, rate: float) -> "Optional[np.ndarray]":
@@ -285,7 +320,7 @@ def dub(req: DubReq):
             out = model(**inputs).waveform
         return out.squeeze().cpu().numpy()
 
-    for cue in req.cues:
+    for cue in cues:
         text = cue.text.strip()
         if not text:
             continue
@@ -304,8 +339,117 @@ def dub(req: DubReq):
         if end_idx > start_idx:
             master[start_idx:end_idx] += wav[: end_idx - start_idx]
 
-    peak = float(np.max(np.abs(master))) or 1.0
-    pcm16 = (np.clip(master / peak, -1.0, 1.0) * 32767).astype(np.int16)
+    return master, sampling_rate
+
+
+def _encode_wav(waveform, sampling_rate: int) -> bytes:
+    import io
+
+    import numpy as np
+    from scipy.io import wavfile
+
+    peak = float(np.max(np.abs(waveform))) or 1.0
+    pcm16 = (np.clip(waveform / peak, -1.0, 1.0) * 32767).astype(np.int16)
     buf = io.BytesIO()
     wavfile.write(buf, sampling_rate, pcm16)
+    return buf.getvalue()
+
+
+@app.post("/dub")
+def dub(req: DubReq):
+    """Synthesize one continuous dub track (WAV) spanning all cues — see
+    _synthesize_narration_track for the per-cue fitting behavior. This is
+    narration that REPLACES the original audio entirely; for music sources
+    where the instrumental should survive, see /dub-music."""
+    waveform, sampling_rate = _synthesize_narration_track(req.cues, req.target)
+    return Response(content=_encode_wav(waveform, sampling_rate), media_type="audio/wav")
+
+
+@app.post("/dub-music")
+async def dub_music(
+    file: UploadFile = File(...),
+    cues: str = Form(...),
+    target: str = Form(...),
+):
+    """Separate the source track into vocals/instrumental (Demucs), keep the
+    instrumental, and mix translated narration on top of it in place of the
+    original vocal — this is NOT sung dubbing (no melody/pitch synthesis;
+    see the project's dubbing research for why real singing translation
+    isn't feasible here), just spoken narration over the original music bed
+    instead of narration replacing the whole mix. Quality ceiling is
+    "understandable narration over a ducked instrumental," not "sounds like
+    a real dub" — set expectations accordingly."""
+    import json
+
+    import numpy as np
+    import torch
+    import torchaudio
+
+    try:
+        cue_list = [DubCue(**c) for c in json.loads(cues)]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid cues: {e}")
+
+    _load_demucs()
+    if _demucs["error"]:
+        raise HTTPException(status_code=500, detail=_demucs["error"])
+    if not _demucs["model"]:
+        raise HTTPException(status_code=503, detail="Demucs model still loading")
+
+    from demucs.apply import apply_model
+
+    model = _demucs["model"]
+    music_sr = model.samplerate
+
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+        tmp.write(await file.read())
+        tmp.flush()
+        wav, sr = torchaudio.load(tmp.name)  # [channels, samples]
+
+    if sr != music_sr:
+        wav = torchaudio.functional.resample(wav, sr, music_sr)
+    if wav.shape[0] == 1 and model.audio_channels == 2:
+        wav = wav.repeat(2, 1)
+
+    # Demucs's own normalize-by-reference-stats convention (matches its CLI):
+    # improves separation quality and needs un-doing on the output.
+    ref = wav.mean(0)
+    ref_mean, ref_std = ref.mean(), ref.std()
+    wav_norm = (wav - ref_mean) / ref_std
+
+    print("[demucs] separating vocals/instrumental …", flush=True)
+    with torch.no_grad():
+        sources = apply_model(model, wav_norm[None], device="cpu", progress=False)[0]
+    sources = sources * ref_std + ref_mean
+    stems = dict(zip(model.sources, sources))
+
+    # Every stem except "vocals" makes up the instrumental bed.
+    instrumental = sum(w for name, w in stems.items() if name != "vocals")
+
+    narration, narration_sr = _synthesize_narration_track(cue_list, target)
+    narration_t = torch.from_numpy(narration).unsqueeze(0)  # [1, samples]
+    if narration_sr != music_sr:
+        narration_t = torchaudio.functional.resample(narration_t, narration_sr, music_sr)
+    # Match the instrumental's channel count (mono narration -> every channel).
+    narration_t = narration_t.expand(instrumental.shape[0], -1)
+
+    length = instrumental.shape[1]
+    if narration_t.shape[1] < length:
+        narration_t = torch.nn.functional.pad(narration_t, (0, length - narration_t.shape[1]))
+    else:
+        narration_t = narration_t[:, :length]
+
+    mixed = instrumental * DUB_MUSIC_INSTRUMENTAL_GAIN + narration_t
+    waveform = mixed.numpy()
+    peak = float(np.max(np.abs(waveform))) or 1.0
+    pcm16 = (np.clip(waveform / peak, -1.0, 1.0) * 32767).astype(np.int16).T  # [samples, channels]
+
+    import io
+
+    from scipy.io import wavfile
+
+    buf = io.BytesIO()
+    wavfile.write(buf, music_sr, pcm16)
     return Response(content=buf.getvalue(), media_type="audio/wav")

@@ -2,7 +2,9 @@ import { spawn } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { AsrCue } from "./asr.js";
 import { downloadVideoClip } from "./urlfetch.js";
+import { synthesizeDubOverMusic } from "./dub.js";
 
 // Tasteful subtitle styling (ASS): white text, black outline, lifted off the
 // bottom edge. Quoted so the commas don't end the filtergraph.
@@ -20,6 +22,28 @@ function runFfmpeg(args: string[], cwd: string): Promise<void> {
         ? resolve()
         : reject(new Error(`ffmpeg failed: ${err.slice(-600)}`)),
     );
+  });
+}
+
+/** Extract a WAV of a local video/audio file's audio track, at a quality
+ * suitable for source separation (Demucs) — plain speech-dub decoding
+ * downsamples to 16kHz mono, which would gut separation quality here. */
+function extractAudioWav(videoPath: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const ff = spawn("ffmpeg", ["-i", videoPath, "-ar", "44100", "-ac", "2", "-f", "wav", "pipe:1"]);
+    const chunks: Buffer[] = [];
+    const errs: Buffer[] = [];
+    ff.stdout.on("data", (d) => chunks.push(d));
+    ff.stderr.on("data", (d) => errs.push(d));
+    ff.on("error", reject);
+    ff.on("close", (code) => {
+      if (code !== 0) {
+        return reject(
+          new Error(`ffmpeg audio extract failed: ${Buffer.concat(errs).toString().slice(-400)}`),
+        );
+      }
+      resolve(Buffer.concat(chunks));
+    });
   });
 }
 
@@ -52,6 +76,12 @@ export async function burnSubtitles(opts: {
    * against the same absolute timeline as `srt`/the trim range, so it trims
    * identically alongside the video when a range is set. */
   dubAudioBuf?: Buffer;
+  /** Music-video dubbing: separates vocals/instrumental and mixes narration
+   * onto the kept instrumental instead of replacing the whole mix (see
+   * synthesizeDubOverMusic). Mutually exclusive with dubAudioBuf — this
+   * computes its own after the video file is resolved below, since it needs
+   * to extract audio from the actual local file regardless of source. */
+  dubMusic?: { cues: AsrCue[]; target: string };
 }): Promise<BurnResult> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "captioneer-burn-"));
   const ranged = opts.startSec != null && opts.endSec != null;
@@ -73,10 +103,20 @@ export async function burnSubtitles(opts: {
     await writeFile(path.join(dir, "subs.srt"), opts.srt, "utf8");
   }
 
+  let dubAudioBuf = opts.dubAudioBuf;
+  if (opts.dubMusic) {
+    const sourceAudio = await extractAudioWav(path.join(dir, videoName));
+    dubAudioBuf = await synthesizeDubOverMusic(
+      opts.dubMusic.cues,
+      opts.dubMusic.target,
+      sourceAudio,
+    );
+  }
+
   let dubName: string | undefined;
-  if (opts.dubAudioBuf) {
+  if (dubAudioBuf) {
     dubName = "dub.wav";
-    await writeFile(path.join(dir, dubName), opts.dubAudioBuf);
+    await writeFile(path.join(dir, dubName), dubAudioBuf);
   }
 
   // Trim goes AFTER -i (output-referenced seeking) rather than before: it's

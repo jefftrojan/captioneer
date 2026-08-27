@@ -5,6 +5,9 @@ services:
       - HF_TOKEN=${HF_TOKEN}
       - MBAZA_MODEL=${MBAZA_MODEL:-mbazaNLP/Nllb_finetuned_general_en_kin}
       - HF_HOME=/cache
+      # Demucs weights (dub-music) download via torch.hub, not the HF cache
+      # — point it at the same persistent volume so they survive restarts.
+      - TORCH_HOME=/cache/torch
     volumes:
       - hf-cache-py:/cache
     ports:

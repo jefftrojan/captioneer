@@ -1251,6 +1251,10 @@ textarea.cue-tgt::placeholder {
   height: 15px;
   cursor: pointer;
 }
+.dub-toggle-sub {
+  margin-left: 22px;
+  font-size: 12px;
+}
 
 /* ---------- preview pane ---------- */
 .preview-pane {

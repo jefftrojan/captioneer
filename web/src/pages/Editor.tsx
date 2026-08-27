@@ -223,6 +223,16 @@ export default function Editor() {
                 />
                 Dub audio into {wf.langName(wf.target)}
               </label>
+              {wf.dubEnabled && (
+                <label className="dub-toggle dub-toggle-sub">
+                  <input
+                    type="checkbox"
+                    checked={wf.dubMusicMode}
+                    onChange={(e) => wf.setDubMusicMode(e.target.checked)}
+                  />
+                  This is a music video
+                </label>
+              )}
               <button className="btn burn" onClick={wf.burnHandler} disabled={wf.burning}>
                 <Clapperboard size={16} />
                 {wf.burning
@@ -235,7 +245,16 @@ export default function Editor() {
                       "(.mp4)",
                     ].join(" ")}
               </button>
-              {wf.dubEnabled && (
+              {wf.dubEnabled && wf.dubMusicMode && (
+                <p className="hint">
+                  Not sung dubbing — separates vocals from the instrumental
+                  and speaks the translation over the kept music bed.
+                  Singing translation (matching melody/pitch) isn't feasible
+                  here; see the project notes for why. Source separation is
+                  slow on CPU — a full song can take 20–30 minutes.
+                </p>
+              )}
+              {wf.dubEnabled && !wf.dubMusicMode && (
                 <p className="hint">
                   Synthesized speech (Meta MMS-TTS) replaces the original
                   audio — voice quality and timing are approximate, not

@@ -167,6 +167,10 @@ app.post("/api/burn", upload.single("video"), async (req, res) => {
     const endSec = req.body?.endSec != null ? Number(req.body.endSec) : undefined;
     const dub = req.body?.dub === "true";
     const dubTarget = req.body?.dubTarget as string | undefined;
+    // Music-video path: keep the instrumental (Demucs separation) and mix
+    // narration onto it instead of replacing the whole mix. See burn.ts /
+    // dub.ts / the sidecar's /dub-music for why this isn't sung dubbing.
+    const dubMusic = req.body?.dubMusic === "true";
     const burnCaptions = req.body?.burnCaptions !== "false";
     if (!srt) return res.status(400).json({ error: "Missing subtitles (srt)" });
     if (!req.file && !url) {
@@ -178,9 +182,9 @@ app.post("/api/burn", upload.single("video"), async (req, res) => {
     // Dub audio is synthesized from the exact same parsed cues as `srt`, so
     // it always lands on whichever timeline convention (absolute vs.
     // 0-based-rebased) the caller already used for the burned captions.
-    const dubAudioBuf = dub
-      ? await synthesizeDub(parseSubtitles(srt), dubTarget!)
-      : undefined;
+    const dubCues = dub ? parseSubtitles(srt) : undefined;
+    const dubAudioBuf =
+      dub && !dubMusic ? await synthesizeDub(dubCues!, dubTarget!) : undefined;
     const { outPath, dir } = await burnSubtitles({
       videoBuf: req.file?.buffer,
       url,
@@ -189,6 +193,7 @@ app.post("/api/burn", upload.single("video"), async (req, res) => {
       endSec,
       burnCaptions,
       dubAudioBuf,
+      dubMusic: dub && dubMusic ? { cues: dubCues!, target: dubTarget! } : undefined,
     });
     res.setHeader("Content-Type", "video/mp4");
     res.setHeader("Content-Disposition", 'attachment; filename="captioned.mp4"');
