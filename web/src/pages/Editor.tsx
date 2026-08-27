@@ -271,22 +271,13 @@ export default function Editor() {
             </div>
           ) : (
             <>
-              <div className="preview-row">
-                <PreviewPane
-                  videoSrc={previewSrc}
-                  cues={wf.cues}
-                  translations={wf.translations}
-                  seekTo={selected ? parseTimeToSeconds(selected.start) : null}
-                  onActiveChange={setLiveIndex}
-                />
-                <TranscriptPanel
-                  cues={wf.cues}
-                  translations={wf.translations}
-                  selectedIndex={selectedIndex}
-                  liveIndex={liveIndex}
-                  onSelect={setSelectedIndex}
-                />
-              </div>
+              <PreviewPane
+                videoSrc={previewSrc}
+                cues={wf.cues}
+                translations={wf.translations}
+                seekTo={selected ? parseTimeToSeconds(selected.start) : null}
+                onActiveChange={setLiveIndex}
+              />
 
               <Timeline
                 cues={wf.cues}
@@ -348,6 +339,18 @@ export default function Editor() {
             </>
           )}
         </section>
+
+        {wf.cues.length > 0 && (
+          <section className="panel editor-transcript">
+            <TranscriptPanel
+              cues={wf.cues}
+              translations={wf.translations}
+              selectedIndex={selectedIndex}
+              liveIndex={liveIndex}
+              onSelect={setSelectedIndex}
+            />
+          </section>
+        )}
       </div>
     </>
   );
